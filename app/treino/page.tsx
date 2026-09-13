@@ -92,17 +92,22 @@ export default function Treino() {
     );
   }
 
+  // Keep stable, non-optional references for callbacks below.
+  // TypeScript does not preserve the earlier null check inside nested functions.
+  const activeRoutine = routine;
+  const activeExercise = exercise;
+
   const currentBest = Math.max(0, ...exerciseEntries.map((set) => Number(set.load) || 0));
   const record = currentBest > previousBest && previousBest > 0;
-  const increasedFromCurrent = currentBest > Number(exercise.defaultLoad || 0);
-  const completedSets = exerciseEntries.filter((_, setIndex) => finished[`${exercise.id}-${setIndex}`]).length;
-  const allSets = routine.exercises.reduce((total, item) => total + item.defaultSets, 0);
+  const increasedFromCurrent = currentBest > Number(activeExercise.defaultLoad || 0);
+  const completedSets = exerciseEntries.filter((_, setIndex) => finished[`${activeExercise.id}-${setIndex}`]).length;
+  const allSets = activeRoutine.exercises.reduce((total, item) => total + item.defaultSets, 0);
   const totalCompleted = Object.values(finished).filter(Boolean).length;
 
   function setValue(setIndex: number, key: 'load' | 'reps', value: number) {
     setEntries((previous) => ({
       ...previous,
-      [exercise.id]: (previous[exercise.id] || []).map((set, position) =>
+      [activeExercise.id]: (previous[activeExercise.id] || []).map((set, position) =>
         position === setIndex ? { ...set, [key]: Math.max(0, value) } : set,
       ),
     }));
@@ -117,7 +122,7 @@ export default function Treino() {
   }
 
   function toggleSet(setIndex: number) {
-    const key = `${exercise.id}-${setIndex}`;
+    const key = `${activeExercise.id}-${setIndex}`;
     const wasFinished = Boolean(finished[key]);
     setFinished((previous) => ({ ...previous, [key]: !wasFinished }));
     if (!wasFinished) startRest(restPreset);
@@ -131,7 +136,7 @@ export default function Treino() {
       if (!continueAnyway) return;
     }
     const minutes = Math.max(1, Math.round((Date.now() - startedAt) / 60000));
-    const records = await saveWorkout(routine.id, entries, minutes);
+    const records = await saveWorkout(activeRoutine.id, entries, minutes);
     window.alert(
       records
         ? `Treino finalizado! Você bateu ${records} novo(s) recorde(s). 🏆`
@@ -145,23 +150,23 @@ export default function Treino() {
       <div className="workout-top">
         <button className="text-btn" type="button" onClick={() => router.back()}>← Sair</button>
         <div className="workout-progress-copy">
-          <strong>{routine.title}</strong>
+          <strong>{activeRoutine.title}</strong>
           <span>{totalCompleted}/{allSets} séries concluídas</span>
         </div>
-        <span className="badge">{index + 1}/{routine.exercises.length}</span>
+        <span className="badge">{index + 1}/{activeRoutine.exercises.length}</span>
       </div>
-      <div className="workout-progress-bar"><span style={{ width: `${((index + 1) / routine.exercises.length) * 100}%` }} /></div>
+      <div className="workout-progress-bar"><span style={{ width: `${((index + 1) / activeRoutine.exercises.length) * 100}%` }} /></div>
 
       <div className="exercise-header">
         <span className="eyebrow">EXERCÍCIO {index + 1}</span>
-        <h1>{exercise.name}</h1>
-        <p>{exercise.muscle}{exercise.machine ? ` • ${exercise.machine}` : ''}</p>
+        <h1>{activeExercise.name}</h1>
+        <p>{activeExercise.muscle}{activeExercise.machine ? ` • ${activeExercise.machine}` : ''}</p>
         <div className="machine-art"><DumbbellIcon size={80} /></div>
 
         <div className="load-summary-grid">
           <div className="load-summary current">
             <span>Carga atual</span>
-            <strong>{exercise.defaultLoad > 0 ? `${exercise.defaultLoad} kg` : '—'}</strong>
+            <strong>{activeExercise.defaultLoad > 0 ? `${activeExercise.defaultLoad} kg` : '—'}</strong>
             <small>Valor sugerido para começar hoje</small>
           </div>
           <div className="load-summary">
@@ -192,7 +197,7 @@ export default function Treino() {
 
       <div>
         {exerciseEntries.map((set, setIndex) => (
-          <div className={`set-row ${finished[`${exercise.id}-${setIndex}`] ? 'completed' : ''}`} key={setIndex}>
+          <div className={`set-row ${finished[`${activeExercise.id}-${setIndex}`] ? 'completed' : ''}`} key={setIndex}>
             <div className="set-label">Série {setIndex + 1}</div>
             <div className="set-field">
               <label>Carga (kg)</label>
@@ -216,7 +221,7 @@ export default function Treino() {
               />
             </div>
             <button
-              className={finished[`${exercise.id}-${setIndex}`] ? 'set-check done' : 'set-check'}
+              className={finished[`${activeExercise.id}-${setIndex}`] ? 'set-check done' : 'set-check'}
               type="button"
               aria-label={`Concluir série ${setIndex + 1}`}
               onClick={() => toggleSet(setIndex)}
@@ -232,7 +237,7 @@ export default function Treino() {
           <span>📈</span>
           <div>
             <strong>Você aumentou a carga neste treino</strong>
-            <small>{exercise.defaultLoad} kg → {currentBest} kg. Ao finalizar, esta será a referência para a próxima vez.</small>
+            <small>{activeExercise.defaultLoad} kg → {currentBest} kg. Ao finalizar, esta será a referência para a próxima vez.</small>
           </div>
         </div>
       )}
@@ -252,7 +257,7 @@ export default function Treino() {
         <button className="ghost-btn" disabled={index === 0} onClick={() => setIndex(Math.max(0, index - 1))}>
           Anterior
         </button>
-        {index < routine.exercises.length - 1 ? (
+        {index < activeRoutine.exercises.length - 1 ? (
           <button className="secondary-btn" onClick={() => setIndex(index + 1)}>
             Próximo exercício
           </button>
