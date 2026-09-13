@@ -80,3 +80,19 @@ As regras impedem que um usuário leia ou altere os dados de outro.
 - Meta semanal
 - PWA instalável no celular
 - Modo demonstração quando o Firebase ainda não está configurado
+
+## Login e criação de conta
+
+A versão atual exige autenticação antes de abrir o aplicativo.
+
+- Entrar com e-mail e senha
+- Criar conta com nome, e-mail, senha e confirmação
+- Mostrar/ocultar senha
+- Recuperação de senha por e-mail quando o Firebase estiver configurado
+- Sessão persistente no aparelho
+- Botão **Sair da conta** no Perfil
+- Cada usuário autenticado usa seu próprio caminho em `users/{uid}/...` no Firestore e Storage
+
+Enquanto as variáveis do Firebase ainda não estiverem preenchidas, existe um modo local apenas para teste. Nesse modo é possível criar uma conta local no navegador; ao configurar o Firebase, o acesso passa a usar o Firebase Authentication.
+
+No Firebase Console, ative **Authentication > Sign-in method > Email/Password** antes de testar o login em produção.

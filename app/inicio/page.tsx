@@ -14,7 +14,7 @@ export default function Inicio(){
   const weekDone=new Set(state.sessions.filter(s=>Date.now()-new Date(`${s.date}T12:00:00`).getTime()<7*864e5).map(s=>s.routineId));
   const best=Math.max(0,...state.sessions.flatMap(s=>s.exercises.map(e=>e.bestLoad)));
   return <>
-    <header className="topbar"><div><h1>Bom dia ❤️</h1><p>Que tal fazer hoje um pouco mais pelo seu grande objetivo?</p></div><div className="avatar">{state.profile.name.slice(0,1).toUpperCase()}</div></header>
+    <header className="topbar"><div><h1>Bom dia, {state.profile.name.split(' ')[0]} ❤️</h1><p>Que tal fazer hoje um pouco mais pelo seu grande objetivo?</p></div><div className="avatar">{state.profile.name.slice(0,1).toUpperCase()}</div></header>
     <section className="hero-card card"><div className="hero-content"><span className="eyebrow">Treino de hoje</span><h2>{routine.title}</h2><p>{routine.label}-feira</p><div className="hero-meta"><span>🏋️ {routine.exercises.length} exercícios</span><span>🗓 Último treino: {latest?new Date(`${latest.date}T12:00:00`).toLocaleDateString('pt-BR'):'—'}</span></div>{routine.rest?<Link className="primary-btn" href="/treinos">Ver minha semana</Link>:<Link className="primary-btn" href={`/treino?dia=${routine.id}`}>Iniciar treino →</Link>}</div></section>
     <section className="section grid-2">
       <div className="card stat-card"><div className="stat-icon"><ChartIcon/></div><strong>{recordCount}</strong><span>cargas aumentadas este mês</span></div>
