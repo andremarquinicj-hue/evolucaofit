@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { ChevronIcon, DumbbellIcon, EditIcon, PlusIcon } from '@/components/icons';
 import { useApp } from '@/lib/app-context';
 import type { Exercise, RoutineDay } from '@/lib/types';
@@ -18,7 +19,7 @@ const EMPTY_ROUTINE: RoutineDay = {
   id: 'segunda',
   short: 'Seg',
   label: 'Segunda',
-  title: 'Novo treino',
+  title: 'Treino não definido',
   rest: false,
   exercises: [],
 };
@@ -29,10 +30,13 @@ function cloneRoutine(routine: RoutineDay): RoutineDay {
 
 export default function Treinos() {
   const { state, updateRoutine } = useApp();
+  const params = useSearchParams();
+  const requestedDay = params.get('dia');
 
-  const [selectedId, setSelectedId] = useState(
-    () => state.routines.find((routine) => !routine.rest)?.id ?? state.routines[0]?.id ?? 'segunda',
-  );
+  const [selectedId, setSelectedId] = useState(() => {
+    if (requestedDay && state.routines.some((routine) => routine.id === requestedDay)) return requestedDay;
+    return state.routines.find((routine) => routine.exercises.length > 0)?.id ?? state.routines[0]?.id ?? 'segunda';
+  });
 
   const selected = useMemo<RoutineDay>(
     () => state.routines.find((routine) => routine.id === selectedId) ?? state.routines[0] ?? EMPTY_ROUTINE,
@@ -42,6 +46,12 @@ export default function Treinos() {
   const [draft, setDraft] = useState<RoutineDay>(() => cloneRoutine(selected));
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+
+  useEffect(() => {
+    if (requestedDay && state.routines.some((routine) => routine.id === requestedDay)) {
+      setSelectedId(requestedDay);
+    }
+  }, [requestedDay, state.routines]);
 
   useEffect(() => {
     setDraft(cloneRoutine(selected));
@@ -92,7 +102,7 @@ export default function Treinos() {
     const next: RoutineDay = {
       ...draft,
       rest: false,
-      title: draft.title === 'Descanso' ? 'Novo treino' : draft.title,
+      title: draft.title === 'Descanso' || draft.title === 'Treino não definido' ? 'Meu treino' : draft.title,
       exercises: [...draft.exercises, exercise],
     };
 
@@ -106,16 +116,22 @@ export default function Treinos() {
     await updateRoutine(draft);
   }
 
+  async function toggleRest() {
+    const next: RoutineDay = draft.rest
+      ? { ...draft, rest: false, title: draft.title === 'Descanso' ? 'Meu treino' : draft.title }
+      : { ...draft, rest: true, title: 'Descanso' };
+    setDraft(next);
+    await updateRoutine(next);
+  }
+
   return (
     <>
       <header className="topbar">
         <div>
           <h1>Meus treinos</h1>
-          <p>Organize, execute e conquiste seus objetivos.</p>
+          <p>Monte a semana e deixe sua carga pronta para cada treino.</p>
         </div>
-        <div className="routine-icon">
-          <DumbbellIcon />
-        </div>
+        <div className="routine-icon"><DumbbellIcon /></div>
       </header>
 
       <div className="tabs">
@@ -133,10 +149,16 @@ export default function Treinos() {
             className={`routine-row ${selectedId === routine.id ? 'active' : ''}`}
             style={{ width: '100%', textAlign: 'left' }}
           >
-            <div className="routine-icon">{routine.rest ? '♡' : '🏋️'}</div>
+            <div className="routine-icon">{routine.rest ? '♡' : routine.exercises.length ? '🏋️' : '+'}</div>
             <div>
               <strong>{routine.label}</strong>
-              <span>{routine.title}</span>
+              <span>
+                {routine.rest
+                  ? 'Descanso'
+                  : routine.exercises.length
+                    ? routine.title
+                    : 'Treino não montado'}
+              </span>
             </div>
             <ChevronIcon size={18} />
           </button>
@@ -145,18 +167,24 @@ export default function Treinos() {
 
       <section className="section">
         <div className="section-head">
-          <h2>{draft.label}</h2>
-          {!draft.rest && (
+          <div>
+            <h2>{draft.label}</h2>
+            <p className="section-subtitle">
+              {draft.rest ? 'Dia marcado para recuperação.' : 'Cadastre exatamente o que será feito neste dia.'}
+            </p>
+          </div>
+          {!draft.rest && draft.exercises.length > 0 && (
             <Link className="badge" href={`/treino?dia=${draft.id}`}>
               Iniciar treino →
             </Link>
           )}
         </div>
 
-        <div className="card" style={{ padding: 14, marginBottom: 12 }}>
+        <div className="card routine-config-card">
           <div className="field">
             <label>NOME DO TREINO</label>
             <input
+              disabled={draft.rest}
               value={draft.title}
               onChange={(event) =>
                 setDraft((current) => ({
@@ -166,153 +194,158 @@ export default function Treinos() {
                 }))
               }
               onBlur={saveTitle}
+              placeholder="Ex.: Pernas + Glúteos"
             />
           </div>
-        </div>
-
-        <div className="section-head">
-          <h3>Exercícios ({draft.exercises.length})</h3>
-          <button className="text-btn" type="button" onClick={() => setShowAdd(true)}>
-            + Adicionar
+          <button className={`rest-toggle ${draft.rest ? 'active' : ''}`} type="button" onClick={toggleRest}>
+            <span>{draft.rest ? '✓' : '♡'}</span>
+            <div>
+              <strong>{draft.rest ? 'Dia de descanso' : 'Marcar como descanso'}</strong>
+              <small>{draft.rest ? 'Toque para voltar a cadastrar treino.' : 'Use nos dias em que não haverá treino.'}</small>
+            </div>
           </button>
         </div>
 
-        <div className="exercise-list">
-          {draft.exercises.length === 0 ? (
-            <div className="card empty">
-              Nenhum exercício neste dia. Toque em “Adicionar” para montar o treino.
-            </div>
-          ) : (
-            draft.exercises.map((exercise) => (
-              <div
-                key={exercise.id}
-                className={`exercise-card ${editingId === exercise.id ? 'selected' : ''}`}
-              >
-                <div className="exercise-thumb">
-                  <DumbbellIcon />
-                </div>
-
-                <div>
-                  <strong>{exercise.name}</strong>
-                  <p>
-                    {exercise.defaultSets} séries × {exercise.defaultReps} repetições •{' '}
-                    {exercise.defaultLoad} kg
-                  </p>
-                  {exercise.machine && <p>{exercise.machine}</p>}
-                </div>
-
-                <button
-                  className="text-btn"
-                  type="button"
-                  aria-label={`Editar ${exercise.name}`}
-                  onClick={() => setEditingId(editingId === exercise.id ? null : exercise.id)}
-                >
-                  <EditIcon size={19} />
-                </button>
-
-                {editingId === exercise.id && (
-                  <div className="exercise-details">
-                    <div className="form-grid">
-                      <div className="field">
-                        <label>EXERCÍCIO</label>
-                        <input
-                          value={exercise.name}
-                          onChange={(event) => editExercise(exercise.id, { name: event.target.value })}
-                        />
-                      </div>
-
-                      <div className="field">
-                        <label>APARELHO</label>
-                        <input
-                          value={exercise.machine ?? ''}
-                          onChange={(event) => editExercise(exercise.id, { machine: event.target.value })}
-                        />
-                      </div>
-
-                      <div className="field">
-                        <label>SÉRIES</label>
-                        <input
-                          type="number"
-                          min="1"
-                          value={exercise.defaultSets}
-                          onChange={(event) =>
-                            editExercise(exercise.id, {
-                              defaultSets: Math.max(1, Number(event.target.value)),
-                            })
-                          }
-                        />
-                      </div>
-
-                      <div className="field">
-                        <label>REPETIÇÕES</label>
-                        <input
-                          type="number"
-                          min="1"
-                          value={exercise.defaultReps}
-                          onChange={(event) =>
-                            editExercise(exercise.id, {
-                              defaultReps: Math.max(1, Number(event.target.value)),
-                            })
-                          }
-                        />
-                      </div>
-
-                      <div className="field">
-                        <label>CARGA (KG)</label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.5"
-                          value={exercise.defaultLoad}
-                          onChange={(event) =>
-                            editExercise(exercise.id, {
-                              defaultLoad: Math.max(0, Number(event.target.value)),
-                            })
-                          }
-                        />
-                      </div>
-
-                      <div className="field">
-                        <label>GRUPO MUSCULAR</label>
-                        <input
-                          value={exercise.muscle}
-                          onChange={(event) => editExercise(exercise.id, { muscle: event.target.value })}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="inline-actions">
-                      <button
-                        className="ghost-btn compact danger"
-                        type="button"
-                        onClick={() => removeExercise(exercise.id)}
-                      >
-                        Excluir
-                      </button>
-                      <button
-                        className="secondary-btn compact"
-                        type="button"
-                        onClick={saveExercise}
-                      >
-                        Salvar alterações
-                      </button>
-                    </div>
-                  </div>
-                )}
+        {!draft.rest && (
+          <>
+            <div className="section-head">
+              <div>
+                <h3>Exercícios ({draft.exercises.length})</h3>
+                <p className="section-subtitle">A carga cadastrada será sugerida automaticamente no próximo treino.</p>
               </div>
-            ))
-          )}
-        </div>
+              <button className="text-btn" type="button" onClick={() => setShowAdd(true)}>
+                + Adicionar
+              </button>
+            </div>
+
+            <div className="exercise-list">
+              {draft.exercises.length === 0 ? (
+                <div className="card empty setup-empty">
+                  <div className="empty-icon">＋</div>
+                  <strong>Comece adicionando o primeiro exercício</strong>
+                  <span>Informe o aparelho, séries, repetições e a carga que ela usa hoje.</span>
+                  <button className="secondary-btn compact" type="button" onClick={() => setShowAdd(true)}>
+                    <PlusIcon size={18} /> Adicionar exercício
+                  </button>
+                </div>
+              ) : (
+                draft.exercises.map((exercise) => (
+                  <div
+                    key={exercise.id}
+                    className={`exercise-card ${editingId === exercise.id ? 'selected' : ''}`}
+                  >
+                    <div className="exercise-thumb"><DumbbellIcon /></div>
+
+                    <div>
+                      <strong>{exercise.name}</strong>
+                      <p>{exercise.defaultSets} séries × {exercise.defaultReps} repetições</p>
+                      <p>
+                        {exercise.machine || exercise.muscle} • Carga atual:{' '}
+                        <b>{exercise.defaultLoad > 0 ? `${exercise.defaultLoad} kg` : 'não definida'}</b>
+                      </p>
+                    </div>
+
+                    <button
+                      className="text-btn"
+                      type="button"
+                      aria-label={`Editar ${exercise.name}`}
+                      onClick={() => setEditingId(editingId === exercise.id ? null : exercise.id)}
+                    >
+                      <EditIcon size={19} />
+                    </button>
+
+                    {editingId === exercise.id && (
+                      <div className="exercise-details">
+                        <div className="form-grid">
+                          <div className="field">
+                            <label>EXERCÍCIO</label>
+                            <input
+                              value={exercise.name}
+                              onChange={(event) => editExercise(exercise.id, { name: event.target.value })}
+                            />
+                          </div>
+
+                          <div className="field">
+                            <label>APARELHO</label>
+                            <input
+                              value={exercise.machine ?? ''}
+                              onChange={(event) => editExercise(exercise.id, { machine: event.target.value })}
+                            />
+                          </div>
+
+                          <div className="field">
+                            <label>SÉRIES</label>
+                            <input
+                              type="number"
+                              min="1"
+                              value={exercise.defaultSets}
+                              onChange={(event) =>
+                                editExercise(exercise.id, { defaultSets: Math.max(1, Number(event.target.value)) })
+                              }
+                            />
+                          </div>
+
+                          <div className="field">
+                            <label>REPETIÇÕES</label>
+                            <input
+                              type="number"
+                              min="1"
+                              value={exercise.defaultReps}
+                              onChange={(event) =>
+                                editExercise(exercise.id, { defaultReps: Math.max(1, Number(event.target.value)) })
+                              }
+                            />
+                          </div>
+
+                          <div className="field">
+                            <label>CARGA ATUAL (KG)</label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.5"
+                              value={exercise.defaultLoad}
+                              onChange={(event) =>
+                                editExercise(exercise.id, { defaultLoad: Math.max(0, Number(event.target.value)) })
+                              }
+                            />
+                          </div>
+
+                          <div className="field">
+                            <label>GRUPO MUSCULAR</label>
+                            <input
+                              value={exercise.muscle}
+                              onChange={(event) => editExercise(exercise.id, { muscle: event.target.value })}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="inline-actions">
+                          <button className="ghost-btn compact danger" type="button" onClick={() => removeExercise(exercise.id)}>
+                            Excluir
+                          </button>
+                          <button className="secondary-btn compact" type="button" onClick={saveExercise}>
+                            Salvar alterações
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </>
+        )}
       </section>
 
       {showAdd && (
         <div className="modal-backdrop" onClick={() => setShowAdd(false)}>
           <div className="modal" onClick={(event) => event.stopPropagation()}>
             <div className="section-head">
-              <h2>Novo exercício</h2>
-              <button className="text-btn" type="button" onClick={() => setShowAdd(false)}>
-                Fechar
-              </button>
+              <div>
+                <h2>Novo exercício</h2>
+                <p className="section-subtitle">Cadastre a carga que ela usa atualmente. Depois o app acompanha cada aumento.</p>
+              </div>
+              <button className="text-btn" type="button" onClick={() => setShowAdd(false)}>Fechar</button>
             </div>
 
             <form onSubmit={addExercise}>
@@ -337,19 +370,18 @@ export default function Treinos() {
                   <input name="sets" type="number" min="1" defaultValue="4" />
                 </div>
                 <div className="field">
-                  <label>REPS</label>
+                  <label>REPETIÇÕES</label>
                   <input name="reps" type="number" min="1" defaultValue="10" />
                 </div>
               </div>
 
               <div className="field" style={{ marginTop: 10 }}>
-                <label>CARGA INICIAL (KG)</label>
+                <label>CARGA ATUAL (KG)</label>
                 <input name="load" type="number" min="0" step="0.5" defaultValue="0" />
               </div>
 
               <button className="primary-btn full" style={{ marginTop: 16 }}>
-                <PlusIcon />
-                Adicionar exercício
+                <PlusIcon /> Adicionar exercício
               </button>
             </form>
           </div>

@@ -13,7 +13,7 @@ import {
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { auth, db, firebaseEnabled, storage } from './firebase';
-import { demoState } from './demo';
+import { createEmptyState, isLegacyDemoState } from './demo';
 import type { AppState, Measurement, RoutineDay, SetEntry } from './types';
 
 const STORAGE_KEY = 'evolucao-fit-state-v1';
@@ -38,17 +38,22 @@ type AppContextValue = {
   addMeasurement: (measurement: Omit<Measurement, 'id'>) => Promise<void>;
   updateProfile: (name: string, goal: string, weeklyGoal: number) => Promise<void>;
   addProgressPhoto: (file: File) => Promise<string>;
-  resetDemo: () => Promise<void>;
+  resetData: () => Promise<void>;
 };
 
 const AppContext = createContext<AppContextValue | null>(null);
 
-function cloneDemo(): AppState {
-  return JSON.parse(JSON.stringify(demoState)) as AppState;
-}
-
 function cleanEmail(email: string) {
   return email.trim().toLowerCase();
+}
+
+function safeState(value: unknown, fallbackName = 'Atleta'): AppState {
+  if (!value || typeof value !== 'object') return createEmptyState(fallbackName);
+  const candidate = value as AppState;
+  if (!Array.isArray(candidate.routines) || !Array.isArray(candidate.sessions)) {
+    return createEmptyState(fallbackName);
+  }
+  return candidate;
 }
 
 async function hashPassword(value: string) {
@@ -72,7 +77,7 @@ function cleanError(error: unknown) {
 }
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<AppState>(cloneDemo());
+  const [state, setState] = useState<AppState>(() => createEmptyState());
   const [ready, setReady] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [localAuthenticated, setLocalAuthenticated] = useState(false);
@@ -91,9 +96,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!firebaseEnabled || !auth || !db) {
       const local = localStorage.getItem(STORAGE_KEY);
+      let next = createEmptyState();
       if (local) {
-        try { setState(JSON.parse(local)); } catch { setState(cloneDemo()); }
+        try {
+          const parsed = safeState(JSON.parse(local));
+          if (isLegacyDemoState(parsed)) {
+            const rawAccount = localStorage.getItem(LOCAL_ACCOUNT_KEY);
+            let name = parsed.profile?.name || 'Atleta';
+            if (rawAccount) {
+              try { name = (JSON.parse(rawAccount) as LocalAccount).name || name; } catch { /* ignora */ }
+            }
+            next = createEmptyState(name);
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+          } else {
+            next = parsed;
+          }
+        } catch {
+          next = createEmptyState();
+        }
       }
+      setState(next);
       setLocalAuthenticated(localStorage.getItem(LOCAL_SESSION_KEY) === '1');
       setReady(true);
       return;
@@ -107,13 +129,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setReady(true);
         return;
       }
-      const snap = await getDoc(doc(activeDb, 'users', nextUser.uid, 'app', 'main'));
+
+      const name = nextUser.displayName || nextUser.email?.split('@')[0] || 'Atleta';
+      const docRef = doc(activeDb, 'users', nextUser.uid, 'app', 'main');
+      const snap = await getDoc(docRef);
+
       if (snap.exists()) {
-        setState(snap.data() as AppState);
+        const loaded = safeState(snap.data(), name);
+        if (isLegacyDemoState(loaded)) {
+          const clean = createEmptyState(name);
+          await setDoc(docRef, JSON.parse(JSON.stringify(clean)));
+          setState(clean);
+        } else {
+          setState(loaded);
+        }
       } else {
-        const seed = cloneDemo();
-        seed.profile.name = nextUser.displayName || nextUser.email?.split('@')[0] || 'Atleta';
-        await setDoc(doc(activeDb, 'users', nextUser.uid, 'app', 'main'), JSON.parse(JSON.stringify(seed)));
+        const seed = createEmptyState(name);
+        await setDoc(docRef, JSON.parse(JSON.stringify(seed)));
         setState(seed);
       }
       setReady(true);
@@ -142,7 +174,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       await signInWithEmailAndPassword(auth, normalizedEmail, password);
       return { ok: true };
-    } catch (e) { return { ok: false, error: cleanError(e) }; }
+    } catch (e) {
+      return { ok: false, error: cleanError(e) };
+    }
   };
 
   const signup = async (name: string, email: string, password: string): Promise<LoginResult> => {
@@ -162,7 +196,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const account: LocalAccount = { name: cleanName, email: normalizedEmail, passwordHash };
       localStorage.setItem(LOCAL_ACCOUNT_KEY, JSON.stringify(account));
       localStorage.setItem(LOCAL_SESSION_KEY, '1');
-      const next = { ...state, profile: { ...state.profile, name: cleanName } };
+      const next = createEmptyState(cleanName);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
       setState(next);
       setLocalAuthenticated(true);
@@ -172,12 +206,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       const credential = await createUserWithEmailAndPassword(auth, normalizedEmail, password);
       await updateFirebaseProfile(credential.user, { displayName: cleanName });
-      const seed = cloneDemo();
-      seed.profile.name = cleanName;
+      const seed = createEmptyState(cleanName);
       if (db) await setDoc(doc(db, 'users', credential.user.uid, 'app', 'main'), JSON.parse(JSON.stringify(seed)));
       setState(seed);
       return { ok: true };
-    } catch (e) { return { ok: false, error: cleanError(e) }; }
+    } catch (e) {
+      return { ok: false, error: cleanError(e) };
+    }
   };
 
   const resetPassword = async (email: string): Promise<LoginResult> => {
@@ -189,7 +224,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       await sendPasswordResetEmail(auth, normalizedEmail);
       return { ok: true };
-    } catch (e) { return { ok: false, error: cleanError(e) }; }
+    } catch (e) {
+      return { ok: false, error: cleanError(e) };
+    }
   };
 
   const logout = async () => {
@@ -202,25 +239,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   const updateRoutine = async (routine: RoutineDay) => {
-    const next = { ...state, routines: state.routines.map((r) => r.id === routine.id ? routine : r) };
+    const next = {
+      ...state,
+      routines: state.routines.map((item) => item.id === routine.id ? routine : item),
+    };
     await persist(next);
   };
 
   const saveWorkout = async (routineId: string, entries: Record<string, SetEntry[]>, durationMin: number) => {
-    const routine = state.routines.find((r) => r.id === routineId);
+    const routine = state.routines.find((item) => item.id === routineId);
     if (!routine) return 0;
+
     let records = 0;
     const exerciseLogs = routine.exercises.map((exercise) => {
       const sets = entries[exercise.id] || [];
       const previousBest = Math.max(0, ...state.sessions.flatMap((session) =>
-        session.exercises.filter((x) => x.exerciseId === exercise.id).map((x) => x.bestLoad)
+        session.exercises.filter((item) => item.exerciseId === exercise.id).map((item) => item.bestLoad)
       ));
-      const bestLoad = Math.max(0, ...sets.map((s) => Number(s.load) || 0));
+      const bestLoad = Math.max(0, ...sets.map((set) => Number(set.load) || 0));
       if (bestLoad > previousBest && previousBest > 0) records += 1;
       return { exerciseId: exercise.id, name: exercise.name, sets, previousBest, bestLoad };
     });
+
     const now = new Date();
-    const date = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+    const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     const newSession = {
       id: `${Date.now()}`,
       date,
@@ -230,17 +272,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       exercises: exerciseLogs,
       records,
     };
+
     const updatedRoutine: RoutineDay = {
       ...routine,
       exercises: routine.exercises.map((exercise) => {
         const sets = entries[exercise.id] || [];
-        const latest = sets.length ? sets[sets.length - 1] : undefined;
-        return latest ? { ...exercise, defaultLoad: Number(latest.load), defaultReps: Number(latest.reps) } : exercise;
-      })
+        if (!sets.length) return exercise;
+        const bestLoad = Math.max(0, ...sets.map((set) => Number(set.load) || 0));
+        const bestSet = [...sets].reverse().find((set) => Number(set.load) === bestLoad) ?? sets[sets.length - 1];
+        return {
+          ...exercise,
+          defaultLoad: bestLoad,
+          defaultReps: Math.max(1, Number(bestSet?.reps) || exercise.defaultReps),
+        };
+      }),
     };
+
     const next: AppState = {
       ...state,
-      routines: state.routines.map((r) => r.id === routineId ? updatedRoutine : r),
+      routines: state.routines.map((item) => item.id === routineId ? updatedRoutine : item),
       sessions: [newSession, ...state.sessions],
     };
     await persist(next);
@@ -284,22 +334,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return url;
   };
 
-  const resetDemo = async () => {
-    const seed = cloneDemo();
+  const resetData = async () => {
+    let name = state.profile.name || 'Atleta';
     if (!firebaseEnabled) {
       const raw = localStorage.getItem(LOCAL_ACCOUNT_KEY);
       if (raw) {
-        try { seed.profile.name = (JSON.parse(raw) as LocalAccount).name; } catch { /* sem ação */ }
+        try { name = (JSON.parse(raw) as LocalAccount).name || name; } catch { /* sem ação */ }
       }
-    } else if (user?.displayName) seed.profile.name = user.displayName;
-    await persist(seed);
+    } else if (user?.displayName) {
+      name = user.displayName;
+    }
+    await persist(createEmptyState(name));
   };
 
   const isAuthenticated = firebaseEnabled ? Boolean(user) : localAuthenticated;
 
   const value = useMemo(() => ({
-    state, ready, user, cloudMode: firebaseEnabled, isAuthenticated, login, signup, resetPassword, logout,
-    updateRoutine, saveWorkout, addMeasurement, updateProfile, addProgressPhoto, resetDemo
+    state,
+    ready,
+    user,
+    cloudMode: firebaseEnabled,
+    isAuthenticated,
+    login,
+    signup,
+    resetPassword,
+    logout,
+    updateRoutine,
+    saveWorkout,
+    addMeasurement,
+    updateProfile,
+    addProgressPhoto,
+    resetData,
   }), [state, ready, user, localAuthenticated, persist]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
